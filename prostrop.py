@@ -105,11 +105,11 @@ class Molecule:
                  args):
         print(f"Loading of molecule from {args.pdb_file}...")
         pdb_parser = Bio.PDB.PDBParser(QUIET=True)
-        residues = list(list(pdb_parser.get_structure("whole pdb", args.pdb_file)[0].get_chains())[0].get_residues())
+        self.structure = pdb_parser.get_structure("structure", args.pdb_file)
         pdb_lines = [line for line in open(args.pdb_file, "r").readlines() if line.split()[0] == "ATOM"]
         self.residues = []
         pdb_line_index = 0
-        for residuum_index, residuum in enumerate(residues):
+        for residuum_index, residuum in enumerate(list(list(self.structure[0].get_chains())[0].get_residues())):
             atom_names = [atom.name for atom in residuum.get_atoms()]
             self.residues.append(Residue(residuum.resname,
                                          residuum_index,
@@ -164,9 +164,10 @@ class Substructure:
                f" mv xtbopt.pdb xtbopt.log {self.data_dir} ;"
                f" rm gfnff_adjacency gfnff_topo gfnff_charges")
 
-    def update_PDB(self, args, pdb, residues):
+    def update_PDB(self, args, pdb, residues, structure):
         pdb_parser = Bio.PDB.PDBParser(QUIET=True)  # zkusit dát mimo
-        structure_atoms = list(pdb_parser.get_structure("pdb", pdb)[0].get_atoms())
+        # structure_atoms = list(pdb_parser.get_structure("pdb", pdb)[0].get_atoms())
+        structure_atoms = list(structure[0].get_atoms())
         substructure = pdb_parser.get_structure("substructure", f"{args.data_dir}/sub_{self.residuum_index}/xtbopt.pdb")[0]
         substructure_residues = list(list(substructure.get_chains())[0].get_residues())  # rewrite for more chains
         substructure_pdb_lines = open(f"{args.data_dir}/sub_{self.residuum_index}/sub_{self.residuum_index}.pdb", "r").readlines()  # přepsat
@@ -182,9 +183,16 @@ class Substructure:
                 else:
                     non_constrained_atoms.append(atom)
                 c += 1
+
         sup = Bio.PDB.Superimposer()
         sup.set_atoms(structure_constrained_atoms, constrained_atoms)
         sup.apply(non_constrained_atoms + constrained_atoms)
+
+        c = 1
+        for atom in list(substructure.get_atoms()):
+            structure_atoms[int(substructure_pdb_lines[c - 1].split()[1]) - 1].set_coord(atom.coord)
+            c += 1
+
         io = Bio.PDB.PDBIO()
         io.set_structure(substructure)
         io.save(f"{args.data_dir}/sub_{self.residuum_index}/imposed_{self.residuum_index}.pdb")
@@ -203,7 +211,9 @@ class Substructure:
         # update residues pdb lines
         for key in new_pdb_lines.keys():
             residues[key].pdb_lines = new_pdb_lines[key]
-        open(pdb, "w").write("".join(pdb_lines))
+
+
+        open(pdb, "w").write("".join(pdb_lines)) # přemístit
 
 
 
@@ -224,7 +234,8 @@ if __name__ == '__main__':
         substructure.optimize()
         substructure.update_PDB(args,
                                 optimized_pdb,
-                                molecule.residues)
+                                molecule.residues,
+                                molecule.structure)
     print("                                               ", end="\r")
     print(colored("ok\n", "green"))
     print("\nRESULTS:")
