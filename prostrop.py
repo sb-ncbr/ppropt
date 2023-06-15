@@ -7,6 +7,7 @@ from sklearn.neighbors import KDTree as kdtreen
 from collections import defaultdict
 from termcolor import colored
 from dataclasses import dataclass
+from scipy.spatial.distance import cdist
 
 amk_radius = {'ALA': 2.4801,
               'ARG': 4.8618,
@@ -94,7 +95,6 @@ class Residue:
     n_ats: int
     coordinates_mean: float
     coordinates: list  # možná smazat?
-    elements: list # možná smazat
     pdb_lines: list
     ca_index: int
 
@@ -116,7 +116,6 @@ class Molecule:
                                          len(atom_names),
                                          residuum.center_of_mass(geometric=True),
                                          [a.coord for a in residuum.get_atoms()],
-                                         [a.element for a in residuum.get_atoms()],
                                          pdb_lines[pdb_line_index:pdb_line_index + len(atom_names)],
                                          atom_names.index("CA") + 1))
             pdb_line_index += len(atom_names)
@@ -135,26 +134,21 @@ class Substructure:
         self.constrained_atoms_indices = [optimized_residuum.ca_index]
         self.pdb = "".join([at_line for at_line in optimized_residuum.pdb_lines])
         self.num_of_atoms = optimized_residuum.n_ats
-        distances, indices = molecule.res_kdtree.query([optimized_residuum.coordinates_mean],
-                                                       k=molecule.num_of_res)  # upravit na nějaké normální číslo a ne num of res, případně cutoff
-        # from math import dist
-        from scipy.spatial.distance import cdist
-        for d, i in zip(distances[0][1:], indices[0][1:]):
+        indices = molecule.res_kdtree.query_radius([optimized_residuum.coordinates_mean], 16)[0]
+        for i in indices:
+            if i == optimized_residuum.index: # the optimizing residue is already processed
+                continue
             res_i = molecule.residues[i]
-            if d < amk_radius[optimized_residuum.name] + amk_radius[res_i.name] + 6 and cdist(optimized_residuum.coordinates, res_i.coordinates).min() < 6:
+            if cdist(optimized_residuum.coordinates, res_i.coordinates).min() < 6:
                 c = 1
+                self.constrained_atoms_indices.append(self.num_of_atoms + res_i.ca_index)
                 for constrained_atom_index in range(self.num_of_atoms + 1,
                                                     self.num_of_atoms + res_i.n_ats + 1):
-                    if c == res_i.ca_index:
-                        self.constrained_atoms_indices.append(constrained_atom_index)
-                    elif min(cdist([res_i.coordinates[c - 1]], optimized_residuum.coordinates)[0]) > 4:
+                    if min(cdist([res_i.coordinates[c - 1]], optimized_residuum.coordinates)[0]) > 4:
                         self.constrained_atoms_indices.append(constrained_atom_index)
                     c += 1
-
                 self.num_of_atoms += res_i.n_ats
                 self.pdb += "".join([at_line for at_line in res_i.pdb_lines])
-
-
         self.data_dir = f"{args.data_dir}/sub_{optimized_residuum.index + 1}"
         self.pdb_file = f"{self.data_dir}/sub_{optimized_residuum.index + 1}.pdb"
 
@@ -176,7 +170,6 @@ class Substructure:
         substructure = pdb_parser.get_structure("substructure", f"{args.data_dir}/sub_{self.residuum_index}/xtbopt.pdb")[0]
         substructure_residues = list(list(substructure.get_chains())[0].get_residues())  # rewrite for more chains
         substructure_pdb_lines = open(f"{args.data_dir}/sub_{self.residuum_index}/sub_{self.residuum_index}.pdb", "r").readlines()  # přepsat
-
         non_constrained_atoms = []
         constrained_atoms = []
         structure_constrained_atoms = []
@@ -189,7 +182,6 @@ class Substructure:
                 else:
                     non_constrained_atoms.append(atom)
                 c += 1
-
         sup = Bio.PDB.Superimposer()
         sup.set_atoms(structure_constrained_atoms, constrained_atoms)
         sup.apply(non_constrained_atoms + constrained_atoms)
@@ -211,23 +203,28 @@ class Substructure:
         # update residues pdb lines
         for key in new_pdb_lines.keys():
             residues[key].pdb_lines = new_pdb_lines[key]
-
         open(pdb, "w").write("".join(pdb_lines))
 
 
+
+
+
 if __name__ == '__main__':
+    s = time()
     args = load_arguments()
     original_pdb, optimized_pdb = prepare_directory(args)
     molecule = Molecule(args)
     print("Structure optimization...")
-    s = time()
+
     for residuum in molecule.residues:
         print(f"Optimization of {residuum.index + 1}. residuum...", end="\r")
         substructure = Substructure(residuum,
                                     molecule,
                                     args)
         substructure.optimize()
-        substructure.update_PDB(args, optimized_pdb, molecule.residues)
+        substructure.update_PDB(args,
+                                optimized_pdb,
+                                molecule.residues)
     print("                                               ", end="\r")
     print(colored("ok\n", "green"))
     print("\nRESULTS:")
@@ -236,6 +233,7 @@ if __name__ == '__main__':
         print(f"Optimized structure energy: {sp_calculation(optimized_pdb, 'after_optimization')}")
     print(f"\nTotal time: {time() - s}s")
     print(f"Time per residue: {(time() - s) / molecule.num_of_res}s")
+
 
     # import pytraj as pt
     # pytraj_pdb = pt.load(original_pdb)
