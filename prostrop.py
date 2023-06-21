@@ -1,8 +1,7 @@
 import argparse
-import Bio.PDB
+from Bio.PDB import Select, PDBIO, PDBParser, Superimposer, NeighborSearch
 from os import system, path
 from time import time
-from sklearn.neighbors import KDTree as kdtreen
 from scipy.spatial.distance import cdist
 
 xtb_settings_template = """$constrain
@@ -12,38 +11,32 @@ $end
 """
 
 def load_arguments():
-    print("\nParsing arguments...")
+    print("\nParsing arguments... ", end="")
     parser = argparse.ArgumentParser()
     parser.add_argument('--pdb_file', type=str, required=True,
                         help='PDB file with structure, which should be optimized.')
     parser.add_argument('--data_dir', type=str, default="data_dir_prostrop",
                         help='Directory for saving results.')
-    parser.add_argument("--rewrite", help="Rewrite data directory if exists.",
-                        action="store_true")
     args = parser.parse_args()
     print("ok")
     return args
 
 
 def prepare_directory(args):
-    print("\nPreparing a data directory...")
+    print("\nPreparing a data directory... ", end="")
     if path.exists(args.data_dir):
-        if args.rewrite:
-            print(f"   Removing old data directory {args.data_dir}")
-            system(f"rm -r {args.data_dir}")
-        else:
-            exit(f"Error! Directory with name {args.data_dir} exists. "
-                 f"Remove existed directory or change --data_dir argument.")
+        exit(f"\n\nError! Directory with name {args.data_dir} exists. "
+             f"Remove existed directory or change --data_dir argument.")
     system(f"mkdir {args.data_dir};"
            f"mkdir {args.data_dir}/inputed_PDB;"
            f"mkdir {args.data_dir}/optimized_PDB;"
            f"cp {args.pdb_file} {args.data_dir}/inputed_PDB;"
            f"cp {args.pdb_file} {args.data_dir}/optimized_PDB")
     print("ok\n")
-    return f"{args.data_dir}/inputed_PDB/{args.pdb_file}", f"{args.data_dir}/optimized_PDB/{args.pdb_file}"
+    return f"{args.data_dir}/inputed_PDB/{path.basename(args.pdb_file)}", f"{args.data_dir}/optimized_PDB/{path.basename(args.pdb_file)}"
 
 
-class SelectIndexedResidues(Bio.PDB.Select):
+class SelectIndexedResidues(Select):
     def accept_residue(self, residue):
         if residue.id[1] in self.indices:
             return 1
@@ -55,7 +48,6 @@ class Substructure:
     def __init__(self,
                  optimized_residuum,
                  structure,
-                 kdtree: kdtreen,
                  data_dir: str):
         self.optimized_residuum = optimized_residuum
         self.optimized_residuum_index = self.optimized_residuum.id[1]
@@ -65,38 +57,28 @@ class Substructure:
         self.structure_constrained_atoms = []
         self.substructure_residues_indices = []
         print(f"Optimization of {self.optimized_residuum_index}. residuum...", end="\r")
-        atom_counter = 0
+        atom_counter = 1
         optimized_residuum_coordinates = [atom.coord for atom in optimized_residuum.get_atoms()]
-        indices = sorted(kdtree.query_radius([self.optimized_residuum.center_of_mass(geometric=True)], 15)[0] + 1)
-        for i in indices:
-            res_i = self.structure[int(i)]
-            res_i_atoms = list(res_i.get_atoms())
-            res_i_atom_names = [atom.name for atom in res_i.get_atoms()]
-            res_i_coordinates = [atom.coord for atom in res_i.get_atoms()]
-
-            if i == self.optimized_residuum_index:
-                # self.constrained_atoms_indices.append(atom_counter + res_i_atom_names.index("CA") + 1)
-                # self.structure_constrained_atoms.append(res_i["CA"])
-                self.substructure_residues_indices.append(i)
-                atom_counter += len(res_i_atom_names)
-
-            elif cdist(optimized_residuum_coordinates, res_i_coordinates).min() < 6:
+        kdtree = NeighborSearch(list(structure.get_atoms()))
+        near_residues = sorted(kdtree.search(self.optimized_residuum.center_of_mass(geometric=True), 15, level="R"))
+        for residuum_i in near_residues:
+            residuum_i_coordinates = [atom.coord for atom in residuum_i.get_atoms()]
+            if residuum_i.id[1] == self.optimized_residuum_index:
+                self.substructure_residues_indices.append(residuum_i.id[1])
+                atom_counter += len(residuum_i)
+            elif cdist(optimized_residuum_coordinates, residuum_i_coordinates).min() < 6:
                 c = 0
-                for constrained_atom_index in range(atom_counter + 1,
-                                                    atom_counter + len(res_i_atom_names) + 1):
-                    if min(cdist([res_i_coordinates[c]], optimized_residuum_coordinates)[0]) > 4:
+                residuum_i_atoms = list(residuum_i.get_atoms())
+                for constrained_atom_index, structure_atom in enumerate(residuum_i.get_atoms(), start=atom_counter):
+                    if min(cdist([residuum_i_coordinates[c]], optimized_residuum_coordinates)[0]) > 4:
                         self.constrained_atoms_indices.append(constrained_atom_index)
-                        self.structure_constrained_atoms.append(res_i_atoms[c])
-                    # elif list(res_i.get_atoms())[c].name == "CA":
-                    #     self.constrained_atoms_indices.append(constrained_atom_index)
-                    #     self.structure_constrained_atoms.append(res_i_atoms[c])
+                        self.structure_constrained_atoms.append(residuum_i_atoms[c])
                     c += 1
-                self.substructure_residues_indices.append(i)
-                atom_counter += len(res_i_atoms)
-
+                self.substructure_residues_indices.append(residuum_i.id[1])
+                atom_counter += len(residuum_i)
         self.substructure_data_dir = f"{self.data_dir}/sub_{self.optimized_residuum_index}"
         self.pdb_file = f"{self.substructure_data_dir}/sub_{self.optimized_residuum_index}.pdb"
-        io = Bio.PDB.PDBIO()
+        io = PDBIO()
         io.set_structure(self.structure)
         selector = SelectIndexedResidues()
         selector.indices = self.substructure_residues_indices
@@ -105,16 +87,15 @@ class Substructure:
 
 
     def optimize(self):
-        xtb_settings_file_name = f"{self.substructure_data_dir}/xtb_settings.inp"
-        with open(xtb_settings_file_name, "w") as xtb_settings_file:
-            xtb_settings_file.write(xtb_settings_template.replace("xxx", ", ".join([str(x) for x in self.constrained_atoms_indices])))
-        system(f"xtb --gfnff {self.pdb_file} --input {xtb_settings_file_name} --opt --alpb water --verbose > "
-               f"{self.substructure_data_dir}/xtb_output.txt 2>&1 ;"
-               f" mv xtbopt.pdb xtbopt.log {self.substructure_data_dir} ;"
-               f" rm gfnff_adjacency gfnff_topo gfnff_charges")
+        substructure_settings = xtb_settings_template.replace("xxx", ", ".join([str(x) for x in self.constrained_atoms_indices]))
+        with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
+            xtb_settings_file.write(substructure_settings)
+        system(f"cd {self.substructure_data_dir} ;"
+               f"xtb sub_{self.optimized_residuum_index}.pdb "
+               f"--gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1")
 
     def update_PDB(self):
-        pdb_parser = Bio.PDB.PDBParser(QUIET=True)  # zkusit dát mimo
+        pdb_parser = PDBParser(QUIET=True)
         substructure = pdb_parser.get_structure("substructure", f"{self.substructure_data_dir}/xtbopt.pdb")[0]
         substructure_residues = list(list(substructure.get_chains())[0].get_residues())  # rewrite for more chains
         non_constrained_atoms = []
@@ -127,7 +108,7 @@ class Substructure:
                 else:
                     non_constrained_atoms.append(atom)
                 c += 1
-        sup = Bio.PDB.Superimposer()
+        sup = Superimposer()
         sup.set_atoms(self.structure_constrained_atoms, constrained_atoms)
         sup.apply(non_constrained_atoms + constrained_atoms)
         substructre_atoms = list(substructure.get_atoms())
@@ -137,43 +118,34 @@ class Substructure:
                 if c+1 not in self.constrained_atoms_indices:
                     atom.set_coord(substructre_atoms[c].coord)
                 c += 1
-
-        io = Bio.PDB.PDBIO()
+        io = PDBIO()
         io.set_structure(substructure)
         io.save(f"{self.substructure_data_dir}/imposed_{self.optimized_residuum_index}.pdb")
 
 
 def load_molecule(pdb_file):
-    print(f"Loading of molecule from {pdb_file}...")
-    structure = Bio.PDB.PDBParser(QUIET=True).get_structure("structure", pdb_file)[0]["A"]
+    print(f"Loading of molecule from {pdb_file}... ", end="")
+    structure = PDBParser(QUIET=True).get_structure("structure", pdb_file)[0]["A"]
     residues = list(structure.get_residues())
-    kdtree = kdtreen([residuum.center_of_mass(geometric=True) for residuum in residues], leaf_size=50)
     print("ok\n")
-    return structure, residues, kdtree
+    return structure, residues
 
 
 if __name__ == '__main__':
     args = load_arguments()
     original_pdb, optimized_pdb = prepare_directory(args)
-    structure, residues, kdtree = load_molecule(args.pdb_file)
+    structure, residues = load_molecule(args.pdb_file)
     s = time()
-    print("Structure optimization...")
     for residuum in structure.get_residues():
         substructure = Substructure(residuum,
                                     structure,
-                                    kdtree,
                                     args.data_dir)
         substructure.optimize()
         substructure.update_PDB()
-    io = Bio.PDB.PDBIO()
+    io = PDBIO()
     io.set_structure(structure)
     io.save(optimized_pdb)
-    print("                                               ", end="\r")
-    print("ok\n")
-    print("\nRESULTS:")
-    print(f"\nTotal time: {time() - s}s")
-    print(f"Time per residue: {(time() - s) / len(list(structure.get_residues()))}s")
-
+    print(f"Structure sucessfully optimized after {round(time() - s)} seconds.\n")
 
 
 
@@ -186,16 +158,21 @@ if __name__ == '__main__':
 # přidávat vodíky?
 
 
+
 # implementovat
 # parallelizovatelnost
-# dopsat aby pdb file mohl být kdekoliv
+# předělat ať je to schopno pracovat s více chainy
 # zkontrolovat optimalizaci kodu
 # zkontrolovat čitelnost kodu
+# pdb parser a pdb vstup/výstup
+
+# xtb by mělo běžet v adresáři
+# dopsat aby pdb file mohl být kdekoliv
 # nahradit kdtree z bio
-# předělat ať je to schopno pracovat s více chainy
 
 
 # do článku
 # ukázat zrychlení a změnu energie mezi full ff optimalizací a prostorpem (rozhodnout kolik a jakých struktur?)
 # ukázat zrychlení a změnu energie mezi full ff optimalizací a full ff optimalizací po prostropu
 # je to paralelizovatelné
+# ukázat že to funguje na 50t atomech
