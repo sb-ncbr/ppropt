@@ -1,14 +1,15 @@
 import argparse
 from Bio.PDB import Select, PDBIO, PDBParser, Superimposer, NeighborSearch
 from os import system, path
-from time import time
 from scipy.spatial.distance import cdist
+
 
 xtb_settings_template = """$constrain
    atoms: xxx
    force constant=1.0
 $end
 """
+
 
 def load_arguments():
     print("\nParsing arguments... ", end="")
@@ -56,37 +57,40 @@ class Substructure:
         self.constrained_atoms_indices = []
         self.structure_constrained_atoms = []
         self.substructure_residues_indices = []
+        # self.constrained_atoms = {}
+
         print(f"Optimization of {self.optimized_residuum_index}. residuum...", end="\r")
         atom_counter = 1
         optimized_residuum_coordinates = [atom.coord for atom in optimized_residuum.get_atoms()]
         kdtree = NeighborSearch(list(structure.get_atoms()))
         near_residues = sorted(kdtree.search(self.optimized_residuum.center_of_mass(geometric=True), 15, level="R"))
         for residuum_i in near_residues:
-            residuum_i_coordinates = [atom.coord for atom in residuum_i.get_atoms()]
-            if residuum_i.id[1] == self.optimized_residuum_index:
-                self.substructure_residues_indices.append(residuum_i.id[1])
-                atom_counter += len(residuum_i)
-            elif cdist(optimized_residuum_coordinates, residuum_i_coordinates).min() < 6:
-                c = 0
-                residuum_i_atoms = list(residuum_i.get_atoms())
-                for constrained_atom_index, structure_atom in enumerate(residuum_i.get_atoms(), start=atom_counter):
-                    if min(cdist([residuum_i_coordinates[c]], optimized_residuum_coordinates)[0]) > 4:
-                        self.constrained_atoms_indices.append(constrained_atom_index)
-                        self.structure_constrained_atoms.append(residuum_i_atoms[c])
-                    c += 1
+            distances = cdist([atom.coord for atom in residuum_i.get_atoms()],
+                              optimized_residuum_coordinates)
+            if distances.min() < 6:
+                if residuum_i.id[1] != self.optimized_residuum_index:
+                    for constrained_atom_index, (atom_distances, atom) in enumerate(zip(distances, residuum_i.get_atoms()), start=atom_counter):
+                        if atom_distances.min() > 4:
+                            self.constrained_atoms_indices.append(constrained_atom_index)
+                            self.structure_constrained_atoms.append(atom)
                 self.substructure_residues_indices.append(residuum_i.id[1])
                 atom_counter += len(residuum_i)
         self.substructure_data_dir = f"{self.data_dir}/sub_{self.optimized_residuum_index}"
         self.pdb_file = f"{self.substructure_data_dir}/sub_{self.optimized_residuum_index}.pdb"
-        io = PDBIO()
         io.set_structure(self.structure)
         selector = SelectIndexedResidues()
         selector.indices = self.substructure_residues_indices
         system(f"mkdir {self.substructure_data_dir}")
         io.save(self.pdb_file, selector)
 
-
     def optimize(self):
+        # substructure_settings = xtb_settings_template.replace("xxx", ", ".join([str(x) for x in self.constrained_atoms_indices]))
+        # with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
+        #     xtb_settings_file.write(substructure_settings)
+        # system(f"cd {self.substructure_data_dir} ;"
+        #        f"xtb sub_{self.optimized_residuum_index}.pdb "
+        #        f"--gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1")
+
         substructure_settings = xtb_settings_template.replace("xxx", ", ".join([str(x) for x in self.constrained_atoms_indices]))
         with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
             xtb_settings_file.write(substructure_settings)
@@ -94,8 +98,9 @@ class Substructure:
                f"xtb sub_{self.optimized_residuum_index}.pdb "
                f"--gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1")
 
+
+
     def update_PDB(self):
-        pdb_parser = PDBParser(QUIET=True)
         substructure = pdb_parser.get_structure("substructure", f"{self.substructure_data_dir}/xtbopt.pdb")[0]
         substructure_residues = list(list(substructure.get_chains())[0].get_residues())  # rewrite for more chains
         non_constrained_atoms = []
@@ -118,7 +123,6 @@ class Substructure:
                 if c+1 not in self.constrained_atoms_indices:
                     atom.set_coord(substructre_atoms[c].coord)
                 c += 1
-        io = PDBIO()
         io.set_structure(substructure)
         io.save(f"{self.substructure_data_dir}/imposed_{self.optimized_residuum_index}.pdb")
 
@@ -135,17 +139,17 @@ if __name__ == '__main__':
     args = load_arguments()
     original_pdb, optimized_pdb = prepare_directory(args)
     structure, residues = load_molecule(args.pdb_file)
-    s = time()
+    pdb_parser = PDBParser(QUIET=True)
+    io = PDBIO()
     for residuum in structure.get_residues():
         substructure = Substructure(residuum,
                                     structure,
                                     args.data_dir)
         substructure.optimize()
         substructure.update_PDB()
-    io = PDBIO()
     io.set_structure(structure)
     io.save(optimized_pdb)
-    print(f"Structure sucessfully optimized after {round(time() - s)} seconds.\n")
+    print(f"Structure succesfully optimized.\n")
 
 
 
@@ -164,11 +168,8 @@ if __name__ == '__main__':
 # předělat ať je to schopno pracovat s více chainy
 # zkontrolovat optimalizaci kodu
 # zkontrolovat čitelnost kodu
-# pdb parser a pdb vstup/výstup
+#error
 
-# xtb by mělo běžet v adresáři
-# dopsat aby pdb file mohl být kdekoliv
-# nahradit kdtree z bio
 
 
 # do článku
