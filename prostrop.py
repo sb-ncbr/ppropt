@@ -1,7 +1,10 @@
 import argparse
+import math
+
 from Bio.PDB import Select, PDBIO, PDBParser, Superimposer, NeighborSearch
 from os import system, path
-from scipy.spatial.distance import cdist
+from scipy.spatial.distance import cdist # přepsat a zkontrolovat
+from dataclasses import dataclass
 
 
 xtb_settings_template = """$constrain
@@ -44,92 +47,144 @@ class SelectIndexedResidues(Select):
         else:
             return 0
 
+@dataclass
+class Residuum:
+    index: int
+    constrained_atom_symbols: list # předělat na set
+    non_constrained_atom_symbols: list # předělat na set
+    constrained_atoms: list
+
 
 class Substructure:
     def __init__(self,
                  optimized_residuum,
-                 structure,
-                 data_dir: str):
-        self.optimized_residuum = optimized_residuum
-        self.optimized_residuum_index = self.optimized_residuum.id[1]
-        self.structure = structure
-        self.data_dir = data_dir
-        self.constrained_atoms_indices = []
-        self.structure_constrained_atoms = []
-        self.substructure_residues_indices = []
-        # self.constrained_atoms = {}
-
-        print(f"Optimization of {self.optimized_residuum_index}. residuum...", end="\r")
-        atom_counter = 1
-        optimized_residuum_coordinates = [atom.coord for atom in optimized_residuum.get_atoms()]
+                 data_dir):
+        optimized_residuum_index = optimized_residuum.id[1]
+        self.substructure_data_dir = f"{data_dir}/sub_{optimized_residuum_index}"
+        self.residues = []
+        print(f"Optimization of {optimized_residuum_index}. residuum...", end="\r")
         kdtree = NeighborSearch(list(structure.get_atoms()))
-        near_residues = sorted(kdtree.search(self.optimized_residuum.center_of_mass(geometric=True), 15, level="R"))
+        near_residues = sorted(kdtree.search(optimized_residuum.center_of_mass(geometric=True), 15, level="R"))
+        self.flexible_residues = [] # smazat!!!!!
         for residuum_i in near_residues:
             distances = cdist([atom.coord for atom in residuum_i.get_atoms()],
-                              optimized_residuum_coordinates)
+                              [atom.coord for atom in optimized_residuum.get_atoms()])
             if distances.min() < 6:
-                if residuum_i.id[1] != self.optimized_residuum_index:
-                    for constrained_atom_index, (atom_distances, atom) in enumerate(zip(distances, residuum_i.get_atoms()), start=atom_counter):
+                constrained_atoms = []
+                non_constrained_atoms = []
+                if residuum_i.id[1] == optimized_residuum_index:
+                    non_constrained_atoms = optimized_residuum.get_atoms()
+                    self.flexible_residues.append(optimized_residuum_index)
+                else:
+                    for atom_distances, atom in zip(distances, residuum_i.get_atoms()):
                         if atom_distances.min() > 4:
-                            self.constrained_atoms_indices.append(constrained_atom_index)
-                            self.structure_constrained_atoms.append(atom)
-                self.substructure_residues_indices.append(residuum_i.id[1])
-                atom_counter += len(residuum_i)
-        self.substructure_data_dir = f"{self.data_dir}/sub_{self.optimized_residuum_index}"
-        self.pdb_file = f"{self.substructure_data_dir}/sub_{self.optimized_residuum_index}.pdb"
-        io.set_structure(self.structure)
+                            constrained_atoms.append(atom)
+                        else:
+                            non_constrained_atoms.append(atom)
+                            self.flexible_residues.append(residuum_i.id[1])
+                self.residues.append(Residuum(index=residuum_i.id[1],
+                                              constrained_atom_symbols=[atom.name for atom in constrained_atoms],
+                                              non_constrained_atom_symbols=[atom.name for atom in non_constrained_atoms],
+                                              constrained_atoms=constrained_atoms))
+
+
+
+
+
+
+
+        io.set_structure(structure)
         selector = SelectIndexedResidues()
-        selector.indices = self.substructure_residues_indices
+        selector.indices = [residuum.index for residuum in self.residues]
         system(f"mkdir {self.substructure_data_dir}")
-        io.save(self.pdb_file, selector)
+        io.save(f"{self.substructure_data_dir}/substructure.pdb", selector)
+
+    def find_cutted_residues(self):
+        self.cutted_residues = []
+        all_indices = [res.index for res in self.residues]
+        for index in all_indices:
+            if index == 1:
+                if 2 not in all_indices:
+                    self.cutted_residues.append(index)
+            elif index == len(list(structure.get_residues())):
+                if len(list(structure.get_residues())) -1 not in all_indices:
+                    self.cutted_residues.append(index)
+            else:
+                if index +1 not in all_indices or index -1 not in all_indices:
+                    self.cutted_residues.append(index)
 
     def optimize(self):
-        # substructure_settings = xtb_settings_template.replace("xxx", ", ".join([str(x) for x in self.constrained_atoms_indices]))
-        # with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
-        #     xtb_settings_file.write(substructure_settings)
-        # system(f"cd {self.substructure_data_dir} ;"
-        #        f"xtb sub_{self.optimized_residuum_index}.pdb "
-        #        f"--gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1")
+        self.find_cutted_residues()
+        system(f"cd {self.substructure_data_dir} ;"
+               f"/home/dargen3/miniconda3/envs/babel_env/bin/obabel -h -ipdb -opdb substructure.pdb > reprotonated_substructure.pdb 2>&1")
+        with open(f"{self.substructure_data_dir}/substructure.pdb") as substructure_file:
+            substructure_lines = [line for line in substructure_file.readlines() if line[:4] == "ATOM"]
+            num_of_atoms = len(substructure_lines)
+        with open(f"{self.substructure_data_dir}/reprotonated_substructure.pdb") as reprotonated_substructure_file:
+            added_atoms = [line for line in reprotonated_substructure_file.readlines() if line[:4] == "ATOM"][num_of_atoms:]
+        with open(f"{self.substructure_data_dir}/repaired_substructure.pdb", "w") as repaired_substructure_file:
+            repaired_substructure_file.write("".join(substructure_lines))
+            ac = 0
+            for line in added_atoms:
+                res_i = int(line.split()[5])
+                if res_i in self.cutted_residues:
+                    if math.dist([float(x) for x in line.split()[6:9]], structure[res_i]["C"].coord) < 1.1:
+                        repaired_substructure_file.write(line)
+                        ac += 1
+                    elif math.dist([float(x) for x in line.split()[6:9]], structure[res_i]["N"].coord) < 1.1:
+                        repaired_substructure_file.write(line)
+                        ac += 1
+
+
+        repaired_substructure = pdb_parser.get_structure("repaired_substructure", f"{self.substructure_data_dir}/substructure.pdb")[0]["A"]
+        self.constrained_atoms_indices = []
+        c = 1
+        for repaired_residuum, residuum in zip(repaired_substructure.get_residues(), self.residues):
+            for atom in repaired_residuum.get_atoms():
+                if atom.name not in residuum.non_constrained_atom_symbols:
+                    self.constrained_atoms_indices.append(c)
+                c += 1
+
+        for x in range(c, ac+c): # constrain added hydrogens
+            self.constrained_atoms_indices.append(x)
+
+
 
         substructure_settings = xtb_settings_template.replace("xxx", ", ".join([str(x) for x in self.constrained_atoms_indices]))
         with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
             xtb_settings_file.write(substructure_settings)
         system(f"cd {self.substructure_data_dir} ;"
-               f"xtb sub_{self.optimized_residuum_index}.pdb "
+               f"xtb repaired_substructure.pdb "
                f"--gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1")
-
 
 
     def update_PDB(self):
         substructure = pdb_parser.get_structure("substructure", f"{self.substructure_data_dir}/xtbopt.pdb")[0]
-        substructure_residues = list(list(substructure.get_chains())[0].get_residues())  # rewrite for more chains
+        substructure_residues = list(list(substructure.get_chains())[0].get_residues())
         non_constrained_atoms = []
         constrained_atoms = []
-        c = 1
-        for residue in substructure_residues:
-            for atom in list(residue.get_atoms()):
-                if c in self.constrained_atoms_indices:
-                    constrained_atoms.append(atom)
-                else:
+        for optimized_residuum, residuum in zip(substructure_residues, self.residues):
+            for atom in optimized_residuum.get_atoms():
+                if atom.name in residuum.non_constrained_atom_symbols:
                     non_constrained_atoms.append(atom)
-                c += 1
+                elif atom.name in residuum.constrained_atom_symbols:
+                    constrained_atoms.append(atom)
         sup = Superimposer()
-        sup.set_atoms(self.structure_constrained_atoms, constrained_atoms)
-        sup.apply(non_constrained_atoms + constrained_atoms)
-        substructre_atoms = list(substructure.get_atoms())
-        c = 0
-        for res_index in self.substructure_residues_indices:
-            for atom in structure[int(res_index)]:
-                if c+1 not in self.constrained_atoms_indices:
-                    atom.set_coord(substructre_atoms[c].coord)
-                c += 1
-        io.set_structure(substructure)
-        io.save(f"{self.substructure_data_dir}/imposed_{self.optimized_residuum_index}.pdb")
+        sup.set_atoms([atom for residuum in self.residues for atom in residuum.constrained_atoms], constrained_atoms)
+        sup.apply(non_constrained_atoms)
+
+
+        for optimized_residuum, residuum in zip(substructure_residues, self.residues):
+            for atom_symbol in residuum.non_constrained_atom_symbols:
+                structure[int(residuum.index)][atom_symbol].set_coord(optimized_residuum[atom_symbol].coord)
+
+
+
 
 
 def load_molecule(pdb_file):
     print(f"Loading of molecule from {pdb_file}... ", end="")
-    structure = PDBParser(QUIET=True).get_structure("structure", pdb_file)[0]["A"]
+    structure = pdb_parser.get_structure("structure", pdb_file)[0]["A"]
     residues = list(structure.get_residues())
     print("ok\n")
     return structure, residues
@@ -137,16 +192,19 @@ def load_molecule(pdb_file):
 
 if __name__ == '__main__':
     args = load_arguments()
+    pdb_parser = PDBParser(QUIET=True)
     original_pdb, optimized_pdb = prepare_directory(args)
     structure, residues = load_molecule(args.pdb_file)
-    pdb_parser = PDBParser(QUIET=True)
     io = PDBIO()
+
     for residuum in structure.get_residues():
         substructure = Substructure(residuum,
-                                    structure,
                                     args.data_dir)
         substructure.optimize()
         substructure.update_PDB()
+
+
+
     io.set_structure(structure)
     io.save(optimized_pdb)
     print(f"Structure succesfully optimized.\n")
@@ -155,25 +213,19 @@ if __name__ == '__main__':
 
 
 
+# -476.929954898424
+
+# -91.009391050480
 
 
-# rozhodnout
-# jaký použít cutoff
-# přidávat vodíky?
 
 
-
-# implementovat
-# parallelizovatelnost
-# předělat ať je to schopno pracovat s více chainy
 # zkontrolovat optimalizaci kodu
 # zkontrolovat čitelnost kodu
-#error
+# error
+# předělat na set
 
 
 
-# do článku
-# ukázat zrychlení a změnu energie mezi full ff optimalizací a prostorpem (rozhodnout kolik a jakých struktur?)
-# ukázat zrychlení a změnu energie mezi full ff optimalizací a full ff optimalizací po prostropu
-# je to paralelizovatelné
-# ukázat že to funguje na 50t atomech
+
+
