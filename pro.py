@@ -116,7 +116,7 @@ class Substructure:
     def optimize(self):
         self.find_cutted_residues()
         system(f"cd {self.substructure_data_dir} ;"
-               f"/home/dargen3/miniconda3/envs/babel_env/bin/obabel -h -ipdb -opdb substructure.pdb > reprotonated_substructure.pdb 2>&1")
+               f"/home/dargen3/miniconda3/envs/babel_env/bin/obabel -h -ipdb -opdb substructure.pdb > reprotonated_substructure.pdb 2>/dev/null")
         with open(f"{self.substructure_data_dir}/substructure.pdb") as substructure_file:
             substructure_lines = [line for line in substructure_file.readlines() if line[:4] == "ATOM"]
             num_of_atoms = len(substructure_lines)
