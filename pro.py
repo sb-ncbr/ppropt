@@ -1,5 +1,4 @@
 import argparse
-import math # todo přepsat?
 from dataclasses import dataclass
 from os import system, path
 
@@ -39,13 +38,15 @@ class Substructure:
     def __init__(self,
                  optimized_residuum,
                  PRO):
+        print(f"Optimization of {optimized_residuum.id[1]}. residuum...", end="\r")
         self.optimized_residuum = optimized_residuum
         self.PRO = PRO
         self.substructure_data_dir = f"{PRO.data_dir}/sub_{self.optimized_residuum.id[1]}"
         self.PDBParser = PDBParser(QUIET=True)
         self.residues = []
-        print(f"Optimization of {self.optimized_residuum.id[1]}. residuum...", end="\r")
+        self.constrained_atoms_indices = []
         near_residues = sorted(PRO.kdtree.search(optimized_residuum.center_of_mass(geometric=True), 15, level="R"))
+        counter = 1
         for residuum_i in near_residues:
             distances = cdist([atom.coord for atom in residuum_i.get_atoms()],
                               [atom.coord for atom in optimized_residuum.get_atoms()])
@@ -53,16 +54,18 @@ class Substructure:
                 constrained_atoms = []
                 non_constrained_atoms = []
                 for atom_distances, atom in zip(distances, residuum_i.get_atoms()):
-                    if atom.name == "CA":
+                    if atom.name == "CA" or atom_distances.min() > 4:
                         constrained_atoms.append(atom)
-                    elif atom_distances.min() > 4:
-                        constrained_atoms.append(atom)
+                        self.constrained_atoms_indices.append(counter)
                     else:
                         non_constrained_atoms.append(atom)
+                    counter += 1
                 self.residues.append(Residuum(index=residuum_i.id[1],
                                               constrained_atom_symbols={atom.name for atom in constrained_atoms},
                                               non_constrained_atom_symbols={atom.name for atom in non_constrained_atoms},
                                               constrained_atoms=constrained_atoms))
+        self.num_of_atoms = counter - 1
+        self.residues_indices = {res.index for res in self.residues}
         io = PDBIO()
         io.set_structure(self.PRO.structure)
         selector = SelectIndexedResidues()
@@ -74,56 +77,40 @@ class Substructure:
 
     def _find_cutted_residues(self):
         self.cutted_residues = []
-        substructure_residues_indices = [res.index for res in self.residues]
-        for index in substructure_residues_indices:
+        for index in self.residues_indices:
             if index == 1:
-                if 2 not in substructure_residues_indices:
+                if 2 not in self.residues_indices:
                     self.cutted_residues.append(index)
             elif index == len(self.PRO.residues):
-                if len(self.PRO.residues) - 1 not in substructure_residues_indices:
+                if len(self.PRO.residues) - 1 not in self.residues_indices:
                     self.cutted_residues.append(index)
             else:
-                if index + 1 not in substructure_residues_indices or index - 1 not in substructure_residues_indices:
+                if index + 1 not in self.residues_indices or index - 1 not in self.residues_indices:
                     self.cutted_residues.append(index)
 
     def _add_hydrogens(self):
         system(f"cd {self.substructure_data_dir} ;"
-               f"/home/dargen3/miniconda3/envs/babel_env/bin/obabel -h -iPDB -oPDB substructure.pdb > reprotonated_substructure.pdb 2>/dev/null")
-        with open(f"{self.substructure_data_dir}/substructure.pdb") as substructure_file:
-            substructure_lines = [line for line in substructure_file.readlines() if line[:4] == "ATOM"]
-            num_of_atoms = len(substructure_lines)
+               f"obabel -h -iPDB -oPDB substructure.pdb > reprotonated_substructure.pdb 2>/dev/null")
         with open(f"{self.substructure_data_dir}/reprotonated_substructure.pdb") as reprotonated_substructure_file:
-            added_atoms = [line for line in reprotonated_substructure_file.readlines() if line[:4] == "ATOM"][num_of_atoms:]
+            atom_lines = [line for line in reprotonated_substructure_file.readlines() if line[:4] == "ATOM"]
+            original_atoms = atom_lines[:self.num_of_atoms]
+            added_atoms = atom_lines[self.num_of_atoms:]
         with open(f"{self.substructure_data_dir}/repaired_substructure.pdb", "w") as repaired_substructure_file:
-            repaired_substructure_file.write("".join(substructure_lines))
-            self.ac = 0
+            repaired_substructure_file.write("".join(original_atoms))
+            added_hydrogens_counter = 0
             for line in added_atoms:
                 res_i = int(line.split()[5])
                 if res_i in self.cutted_residues:
-                    if math.dist([float(x) for x in [line[30:38], line[38:46], line[46:54]]], self.PRO.structure[res_i]["C"].coord) < 1.1:
+                    if cdist(([float(x) for x in [line[30:38], line[38:46], line[46:54]]],), (self.PRO.structure[res_i]["C"].coord,)) < 1.1:
                         repaired_substructure_file.write(line)
-                        self.ac += 1
-                    elif math.dist([float(x) for x in [line[30:38], line[38:46], line[46:54]]], self.PRO.structure[res_i]["N"].coord) < 1.1:
+                        added_hydrogens_counter += 1
+                    elif cdist(([float(x) for x in [line[30:38], line[38:46], line[46:54]]],), (self.PRO.structure[res_i]["N"].coord,)) < 1.1:
                         repaired_substructure_file.write(line)
-                        self.ac += 1
-
-
-        self.repaired_substructure = self.PDBParser.get_structure("repaired_substructure", f"{self.substructure_data_dir}/substructure.pdb")[0]["A"]
-
-
-    def optimize(self):
-
-        self.constrained_atoms_indices = []
-        c = 1
-        for repaired_residuum, residuum in zip(self.repaired_substructure.get_residues(), self.residues):
-            for atom in repaired_residuum.get_atoms():
-                if atom.name not in residuum.non_constrained_atom_symbols:
-                    self.constrained_atoms_indices.append(c)
-                c += 1
-
-        for x in range(c, self.ac+c): # constrain added hydrogens
+                        added_hydrogens_counter += 1
+        for x in range(self.num_of_atoms + 1, self.num_of_atoms + 1 + added_hydrogens_counter):  # constrain added hydrogens
             self.constrained_atoms_indices.append(x)
 
+    def optimize(self):
         xtb_settings_template = """$constrain
    atoms: xxx
    force constant=1.0
@@ -132,7 +119,6 @@ $opt
     engine=rf
 $end
 """
-
         substructure_settings = xtb_settings_template.replace("xxx", ", ".join([str(x) for x in self.constrained_atoms_indices]))
         with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
             xtb_settings_file.write(substructure_settings)
@@ -239,6 +225,7 @@ class PRO:
         print(f"Loading of molecule from {self.PDB_file}... ", end="")
         self.structure = PDBParser(QUIET=True).get_structure("structure", self.PDB_file)[0]["A"]
         self.residues = list(self.structure.get_residues())
+        print("ok\n")
 
     def _calculate_depth_of_residues(self):
         self.kdtree = NeighborSearch(list(self.structure.get_atoms()))
@@ -280,9 +267,9 @@ if __name__ == '__main__':
 # cutoff je 12
 
 
-# přepsat do class
-#ošetřit zadání špatného PDB
-# limitations
+# ošetřit zadání špatného PDB
+# limitations, requirements, instalatino
 # napsat readme
-
 # dopsat ať jde poznat, které reziduum byl a nebylo optimalizované
+# do requirements přidat babel!!! přepsat verzi v článku
+# podívat se zda je všechno potřeba? Vše v residue + indices...
