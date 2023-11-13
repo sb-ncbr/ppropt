@@ -14,6 +14,9 @@ def load_arguments():
     parser.add_argument('--data_dir', type=str, required=True,
                         help='Directory for saving results.')
     args = parser.parse_args()
+    if not path.isfile(args.PDB_file):
+        print(f"\nERROR! File {args.PDB_file} does not exist!\n")
+        exit()
     print("ok")
     return args
 
@@ -209,8 +212,12 @@ class PRO:
         print("ok\n")
 
     def _load_molecule(self):
-        print(f"Loading of molecule from {self.PDB_file}... ", end="")
-        self.structure = PDBParser(QUIET=True).get_structure("structure", self.PDB_file)[0]["A"]
+        print(f"Loading of structure from {self.PDB_file}... ", end="")
+        try:
+            self.structure = PDBParser(QUIET=True).get_structure("structure", self.PDB_file)[0]["A"]
+        except KeyError:
+            print(f"\nERROR! PDB file {self.PDB_file} does not contain any structure.\n")
+            exit()
         self.residues = list(self.structure.get_residues())
         print("ok\n")
 
@@ -227,14 +234,17 @@ if __name__ == '__main__':
     
 
 
-# do článku
-# convergence error
-# jak se propisují constrained residua
-# postupujeme od nejzanořenějších
-# cutoff je 12
 
-# ošetřit zadání špatného PDB
-# limitations, requirements, instalatin, usage do readme
+# zkusit jak se to chová s convergence errorem
 # dopsat ať jde poznat, které reziduum bylo a nebylo optimalizované
+
+# do článku
+# limitations
+# openbabel, version
+
+# do readme
+# limitations, requirements, instalatin, usage do readme
+
+# udělat requirements.txt soubor
 # do requirements přidat babel!!! přepsat verzi v článku
 

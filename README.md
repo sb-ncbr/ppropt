@@ -15,7 +15,7 @@ $ conda install scipy=1.11.3 biopython=1.81 openbabel=3.1.1 xtb=6.6.1
 Run the PRO optimization by running the following command inside github repository:
 
 ```bash
-(venv) $ python3.11 pro.py --PDB_file <path_to_file> --data_dir <directory_to_store_data>
+$ python3.11 pro.py --PDB_file <path_to_file> --data_dir <directory_to_store_data>
 ```
 
 ## License
