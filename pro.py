@@ -30,7 +30,7 @@ class SelectIndexedResidues(Select):
 
 
 @dataclass
-class Residuum:
+class Residue:
     index: int
     constrained_atom_symbols: set
     non_constrained_atom_symbols: set
@@ -39,35 +39,35 @@ class Residuum:
 
 class Substructure:
     def __init__(self,
-                 optimized_residuum,
+                 optimized_residue,
                  PRO):
-        print(f"Optimization of {optimized_residuum.id[1]}. residuum...", end="\r")
-        self.optimized_residuum = optimized_residuum
+        print(f"Optimization of {optimized_residue.id[1]}. residue...", end="\r")
+        self.optimized_residue = optimized_residue
         self.PRO = PRO
-        self.substructure_data_dir = f"{PRO.data_dir}/sub_{self.optimized_residuum.id[1]}"
+        self.substructure_data_dir = f"{PRO.data_dir}/sub_{self.optimized_residue.id[1]}"
         self.PDBParser = PDBParser(QUIET=True)
         self.residues = []
         self.constrained_atoms_indices = []
-        near_residues = sorted(PRO.kdtree.search(optimized_residuum.center_of_mass(geometric=True), 15, level="R"))
+        near_residues = sorted(PRO.kdtree.search(optimized_residue.center_of_mass(geometric=True), 15, level="R"))
         counter_atoms = 1  # start from 1 because of xtb countering
         counter_residues = 0
-        for res_i, residuum in enumerate(near_residues, start=1):
-            if residuum == self.optimized_residuum:
-                self.substructure_optimized_residuum_index = counter_residues
-            distances = cdist([atom.coord for atom in residuum.get_atoms()],
-                              [atom.coord for atom in optimized_residuum.get_atoms()])
+        for res_i, residue in enumerate(near_residues, start=1):
+            if residue == self.optimized_residue:
+                self.substructure_optimized_residue_index = counter_residues
+            distances = cdist([atom.coord for atom in residue.get_atoms()],
+                              [atom.coord for atom in optimized_residue.get_atoms()])
             if distances.min() < 6:
                 counter_residues += 1
                 constrained_atoms = []
                 non_constrained_atoms = []
-                for atom_distances, atom in zip(distances, residuum.get_atoms()):
+                for atom_distances, atom in zip(distances, residue.get_atoms()):
                     if atom.name == "CA" or atom_distances.min() > 4:
                         constrained_atoms.append(atom)
                         self.constrained_atoms_indices.append(str(counter_atoms))
                     else:
                         non_constrained_atoms.append(atom)
                     counter_atoms += 1
-                self.residues.append(Residuum(index=residuum.id[1],
+                self.residues.append(Residue(index=residue.id[1],
                                               constrained_atom_symbols={atom.name for atom in constrained_atoms},
                                               non_constrained_atom_symbols={atom.name for atom in non_constrained_atoms},
                                               constrained_atoms=constrained_atoms))
@@ -76,7 +76,7 @@ class Substructure:
         io = PDBIO()
         io.set_structure(self.PRO.structure)
         selector = SelectIndexedResidues()
-        selector.indices = [residuum.index for residuum in self.residues]
+        selector.indices = [residue.index for residue in self.residues]
         system(f"mkdir {self.substructure_data_dir}")
         io.save(f"{self.substructure_data_dir}/substructure.pdb", selector)
         self._find_cutted_residues()
@@ -138,7 +138,7 @@ $end
                    f"xtb repaired_substructure.pdb "
                    f"--gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1 ; rm gfnff_*")
         if not path.isfile(f"{self.substructure_data_dir}/xtbopt.pdb"):
-            print(f"\n\nWarning! {self.optimized_residuum.id[1]}. residuum skipped due to convergence issues. \n\n")
+            print(f"\n\nWarning! {self.optimized_residue.id[1]}. residue skipped due to convergence issues. \n\n")
             return False
         return True
 
@@ -147,35 +147,35 @@ $end
         optimized_substructure_residues = list(list(optimized_substructure.get_chains())[0].get_residues())
         non_constrained_atoms = []
         constrained_atoms = []
-        for optimized_residuum, residuum in zip(optimized_substructure_residues, self.residues):
-            for atom in optimized_residuum.get_atoms():
-                if atom.name in residuum.non_constrained_atom_symbols:
+        for optimized_residue, residue in zip(optimized_substructure_residues, self.residues):
+            for atom in optimized_residue.get_atoms():
+                if atom.name in residue.non_constrained_atom_symbols:
                     non_constrained_atoms.append(atom)
-                elif atom.name in residuum.constrained_atom_symbols:
+                elif atom.name in residue.constrained_atom_symbols:
                     constrained_atoms.append(atom)
                 # added hydrogens are ignored
 
         # superimpose
         sup = Superimposer()
-        sup.set_atoms([atom for residuum in self.residues for atom in residuum.constrained_atoms], constrained_atoms)
+        sup.set_atoms([atom for residue in self.residues for atom in residue.constrained_atoms], constrained_atoms)
         sup.apply(optimized_substructure.get_atoms())
-        optimized_residuum_coordinates = [atom.coord for atom in optimized_substructure_residues[self.substructure_optimized_residuum_index]]
-        for optimized_residuum, residuum in zip(optimized_substructure_residues, self.residues):
+        optimized_residue_coordinates = [atom.coord for atom in optimized_substructure_residues[self.substructure_optimized_residue_index]]
+        for optimized_residue, residue in zip(optimized_substructure_residues, self.residues):
             # update position of non-constrained atoms
-            for atom_symbol in residuum.non_constrained_atom_symbols:
-                self.PRO.structure[int(residuum.index)][atom_symbol].set_coord(optimized_residuum[atom_symbol].coord)
+            for atom_symbol in residue.non_constrained_atom_symbols:
+                self.PRO.structure[int(residue.index)][atom_symbol].set_coord(optimized_residue[atom_symbol].coord)
             # update position of constrained atoms
-            for atom_symbol in residuum.constrained_atom_symbols:
-                ox, oy, oz = self.PRO.structure[int(residuum.index)][atom_symbol].coord
-                nx, ny, nz = optimized_residuum[atom_symbol].coord  # o means original
-                distance = cdist([optimized_residuum[atom_symbol].coord],  # n means new
-                                      optimized_residuum_coordinates).min()
+            for atom_symbol in residue.constrained_atom_symbols:
+                ox, oy, oz = self.PRO.structure[int(residue.index)][atom_symbol].coord
+                nx, ny, nz = optimized_residue[atom_symbol].coord  # o means original
+                distance = cdist([optimized_residue[atom_symbol].coord],  # n means new
+                                      optimized_residue_coordinates).min()
                 mx = 6  # maximum
                 if distance < mx:
                     opt_x = ox - (ox-nx) * (1-distance/mx)
                     opt_y = oy - (oy-ny) * (1-distance/mx)
                     opt_z = oz - (oz-nz) * (1-distance/mx)
-                    self.PRO.structure[int(residuum.index)][atom_symbol].set_coord((opt_x, opt_y, opt_z))
+                    self.PRO.structure[int(residue.index)][atom_symbol].set_coord((opt_x, opt_y, opt_z))
 
 
 class PRO:
@@ -223,28 +223,10 @@ class PRO:
 
     def _calculate_depth_of_residues(self):
         self.kdtree = NeighborSearch(list(self.structure.get_atoms()))
-        self.residues_depth = [len(self.kdtree.search(residuum.center_of_mass(geometric=True), 15, level="R"))
-                               for residuum in self.residues]
+        self.residues_depth = [len(self.kdtree.search(residue.center_of_mass(geometric=True), 15, level="R"))
+                               for residue in self.residues]
 
 
 if __name__ == '__main__':
     args = load_arguments()
     PRO(args.data_dir, args.PDB_file).optimize()
-
-    
-
-
-
-# zkusit jak se to chová s convergence errorem
-# dopsat ať jde poznat, které reziduum bylo a nebylo optimalizované
-
-# do článku
-# limitations
-# openbabel, version
-
-# do readme
-# limitations, requirements, instalatin, usage do readme
-
-# udělat requirements.txt soubor
-# do requirements přidat babel!!! přepsat verzi v článku
-
