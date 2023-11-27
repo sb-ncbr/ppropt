@@ -1,5 +1,6 @@
 import argparse
 from dataclasses import dataclass
+import json
 from os import system, path
 
 from Bio.PDB import Select, PDBIO, PDBParser, Superimposer, NeighborSearch
@@ -68,9 +69,9 @@ class Substructure:
                         non_constrained_atoms.append(atom)
                     counter_atoms += 1
                 self.residues.append(Residue(index=residue.id[1],
-                                              constrained_atom_symbols={atom.name for atom in constrained_atoms},
-                                              non_constrained_atom_symbols={atom.name for atom in non_constrained_atoms},
-                                              constrained_atoms=constrained_atoms))
+                                             constrained_atom_symbols={atom.name for atom in constrained_atoms},
+                                             non_constrained_atom_symbols={atom.name for atom in non_constrained_atoms},
+                                             constrained_atoms=constrained_atoms))
         self.num_of_atoms = counter_atoms - 1
         self.residues_indices = {res.index for res in self.residues}
         io = PDBIO()
@@ -190,11 +191,20 @@ class PRO:
         self._load_molecule()
         self._calculate_depth_of_residues()
         # optimize residues from the most embedded residues
+        logs = []
         for res_i in sorted(range(len(self.residues_depth)), key=self.residues_depth.__getitem__, reverse=True):
-            substructure = Substructure(self.residues[res_i],
+            residue = self.residues[res_i]
+            substructure = Substructure(residue,
                                         self)
-            if substructure.optimize():
+            optimized = substructure.optimize()
+            if optimized:
                 substructure.update_PDB()
+            logs.append({"residue index": res_i+1,
+                         "residue name": residue.resname,
+                         "optimized": optimized})
+        with open(f"{self.data_dir}/residues.logs", "w") as residues_logs:
+            logs = json.dumps(sorted(logs, key=lambda x: x['residue index']), indent=2)
+            residues_logs.write(logs)
         io = PDBIO()
         io.set_structure(self.structure)
         io.save(f"{self.data_dir}/optimized_PDB/{path.basename(self.PDB_file[:-4])}_optimized.pdb")
@@ -230,3 +240,23 @@ class PRO:
 if __name__ == '__main__':
     args = load_arguments()
     PRO(args.data_dir, args.PDB_file).optimize()
+
+
+
+# od Tomáše
+# upravit readme ať to instaluje z requirements
+# pathlib
+
+
+# zkusit jak se to chová s convergence errorem
+# dopsat ať jde poznat, které reziduum bylo a nebylo optimalizované
+
+# do článku
+# limitations
+# openbabel, version
+
+# do readme
+# limitations, requirements, instalatin, usage do readme
+
+# udělat requirements.txt soubor
+# do requirements přidat babel!!! přepsat verzi v článku
