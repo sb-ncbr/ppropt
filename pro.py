@@ -4,6 +4,7 @@ import json
 from os import system, path
 
 from Bio.PDB import Select, PDBIO, PDBParser, Superimposer, NeighborSearch
+from Bio import SeqUtils
 from scipy.spatial.distance import cdist
 
 
@@ -200,7 +201,7 @@ class PRO:
             if optimized:
                 substructure.update_PDB()
             logs.append({"residue index": res_i+1,
-                         "residue name": residue.resname,
+                         "residue name": SeqUtils.IUPACData.protein_letters_3to1[residue.resname.capitalize()],
                          "optimized": optimized})
         with open(f"{self.data_dir}/residues.logs", "w") as residues_logs:
             logs = json.dumps(sorted(logs, key=lambda x: x['residue index']), indent=2)
