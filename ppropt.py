@@ -241,23 +241,3 @@ class PRO:
 if __name__ == '__main__':
     args = load_arguments()
     PRO(args.data_dir, args.PDB_file).optimize()
-
-
-
-# od Tomáše
-# upravit readme ať to instaluje z requirements
-# pathlib
-
-
-# zkusit jak se to chová s convergence errorem
-# dopsat ať jde poznat, které reziduum bylo a nebylo optimalizované
-
-# do článku
-# limitations
-# openbabel, version
-
-# do readme
-# limitations, requirements, instalatin, usage do readme
-
-# udělat requirements.txt soubor
-# do requirements přidat babel!!! přepsat verzi v článku
