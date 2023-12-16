@@ -130,13 +130,20 @@ $end
         with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
             xtb_settings_file.write(substructure_settings)
         system(f"cd {self.substructure_data_dir} ;"
-               f"xtb repaired_substructure.pdb "
-               f"--gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1 ; rm gfnff_*")
+               f"ulimit -s unlimited ;"
+               f"export OMP_NUM_THREADS=1,1 ;"
+               f"export OMP_MAX_ACTIVE_LEVELS=1 ;"
+               f"export MKL_NUM_THREADS=1 ;"
+               f"xtb repaired_substructure.pdb --gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1 ; rm gfnff_*")
         if not path.isfile(f"{self.substructure_data_dir}/xtbopt.pdb"): # second try by L-ANCOPT
             substructure_settings = xtb_settings_template.replace("xxx", ", ".join(self.constrained_atoms_indices)).replace("rf", "lbfgs")
             with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
                 xtb_settings_file.write(substructure_settings)
             system(f"cd {self.substructure_data_dir} ;"
+                   f"ulimit -s unlimited ;"
+                   f"export OMP_NUM_THREADS=1,1 ;"
+                   f"export OMP_MAX_ACTIVE_LEVELS=1 ;"
+                   f"export MKL_NUM_THREADS=1 ;"
                    f"xtb repaired_substructure.pdb "
                    f"--gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1 ; rm gfnff_*")
         if not path.isfile(f"{self.substructure_data_dir}/xtbopt.pdb"):
