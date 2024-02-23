@@ -147,7 +147,7 @@ $end
 
 
             residual_rmsd = np.sqrt(np.sum((np.array(original_atoms_positions) - np.array(optimized_atoms_positions)) ** 2) / len(original_atoms_positions))
-            if residual_rmsd > 0.5:
+            if residual_rmsd > 1:
                 category = "Highly optimized rezidue"
         else:
             category = "Not optimized rezidue"
