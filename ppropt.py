@@ -7,6 +7,8 @@ from Bio.PDB import Select, PDBIO, PDBParser, Superimposer, NeighborSearch
 from dataclasses import dataclass
 from os import system, path
 from scipy.spatial.distance import cdist
+from multiprocessing import Process, Manager
+from multiprocessing import Pool
 
 
 def load_arguments():
@@ -16,6 +18,8 @@ def load_arguments():
                         help='PDB file with structure, which should be optimized.')
     parser.add_argument('--data_dir', type=str, required=True,
                         help='Directory for saving results.')
+    parser.add_argument('--cpu', type=int, required=False, default=1,
+                        help='How many CPUs should be used for the calculation.')
     args = parser.parse_args()
     if not path.isfile(args.PDB_file):
         print(f"\nERROR! File {args.PDB_file} does not exist!\n")
@@ -51,26 +55,42 @@ def numba_dist(optimized_residue, residue):
      return mins, mins.min()
 
 
+def optimize_substructures(res, PRO):
+        substructure = Substructure(res, PRO)
+        substructure_data_dir = f"{PRO.data_dir}/sub_{res.id[1]}"
+        system(f"cd {substructure_data_dir} ;"
+               f"ulimit -s unlimited ;"
+               f"export OMP_NUM_THREADS=1,1 ;"
+               f"export OMP_MAX_ACTIVE_LEVELS=1 ;"
+               f"export MKL_NUM_THREADS=1 ;"
+               f"xtb substructure.pdb --gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1 ; rm gfnff_*")
+        if not path.isfile(f"{substructure_data_dir}/xtbopt.pdb"): # second try by L-ANCOPT
+            substructure_settings = open(f"{substructure_data_dir}/xtb_settings.inp", "r").read().replace("rf", "lbfgs") # zkusit, zda funguje!
+            with open(f"{substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
+                xtb_settings_file.write(substructure_settings)
+            system(f"cd {self.substructure_data_dir} ;"
+                   f"ulimit -s unlimited ;"
+                   f"export OMP_NUM_THREADS=1,1 ;"
+                   f"export OMP_MAX_ACTIVE_LEVELS=1 ;"
+                   f"export MKL_NUM_THREADS=1 ;"
+                   f"xtb substructure.pdb --gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1 ; rm gfnff_*")
+        return substructure.update_PDB()
+
 class Substructure:
     def __init__(self,
                  optimized_residue,
                  PRO):
-        print(f"Optimization of {optimized_residue.id[1]}. residue...", end="\r")
         self.optimized_residue = optimized_residue
         self.PRO = PRO
         self.substructure_data_dir = f"{PRO.data_dir}/sub_{self.optimized_residue.id[1]}"
         self.PDBParser = PDBParser(QUIET=True)
         self.residues = []
         self.constrained_atoms_indices = []
-        near_residues = sorted(PRO.kdtree.search(optimized_residue.center_of_mass(geometric=True), 12, level="R"))
+        near_residues = sorted(self.PRO.nearest_residues[self.optimized_residue.id[1]-1])
         counter_atoms = 1  # start from 1 because of xtb countering
-        counter_residues = 0
         for residue in near_residues:
-            if residue == self.optimized_residue:
-                self.substructure_optimized_residue_index = counter_residues
             mins, total_min = numba_dist(np.array([atom.coord for atom in residue.get_atoms()]), np.array([atom.coord for atom in optimized_residue.get_atoms()]))
             if total_min < 5:
-                counter_residues += 1
                 constrained_atoms = []
                 non_constrained_atoms_symbols = set()
                 for atom_distance, atom in zip(mins, residue.get_atoms()):
@@ -89,98 +109,79 @@ class Substructure:
         selector = SelectIndexedResidues()
         selector.indices = set([residue.index for residue in self.residues])
         self.PRO.io.save(f"{self.substructure_data_dir}/substructure.pdb", selector)
-
-
-    def optimize(self):
         xtb_settings_template = """$constrain
-   atoms: xxx
-   force constant=1.0
+atoms: xxx
+force constant=1.0
 $end
 $opt
-    engine=rf
+engine=rf
 $end
 """
         substructure_settings = xtb_settings_template.replace("xxx", ", ".join(self.constrained_atoms_indices))
         with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
             xtb_settings_file.write(substructure_settings)
-        system(f"cd {self.substructure_data_dir} ;"
-               f"ulimit -s unlimited ;"
-               f"export OMP_NUM_THREADS=1,1 ;"
-               f"export OMP_MAX_ACTIVE_LEVELS=1 ;"
-               f"export MKL_NUM_THREADS=1 ;"
-               f"xtb substructure.pdb --gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1 ; rm gfnff_*")
-        if not path.isfile(f"{self.substructure_data_dir}/xtbopt.pdb"): # second try by L-ANCOPT
-            substructure_settings = xtb_settings_template.replace("xxx", ", ".join(self.constrained_atoms_indices)).replace("rf", "lbfgs")
-            with open(f"{self.substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
-                xtb_settings_file.write(substructure_settings)
-            system(f"cd {self.substructure_data_dir} ;"
-                   f"ulimit -s unlimited ;"
-                   f"export OMP_NUM_THREADS=1,1 ;"
-                   f"export OMP_MAX_ACTIVE_LEVELS=1 ;"
-                   f"export MKL_NUM_THREADS=1 ;"
-                   f"xtb substructure.pdb --gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1 ; rm gfnff_*")
-        if not path.isfile(f"{self.substructure_data_dir}/xtbopt.pdb"):
-            print(f"\n\nWarning! {self.optimized_residue.id[1]}. residue skipped due to convergence issues. \n\n")
-            return False
-        return True
+
 
     def update_PDB(self):
-        optimized_substructure = self.PDBParser.get_structure("substructure", f"{self.substructure_data_dir}/xtbopt.pdb")[0]
-        optimized_substructure_residues = list(list(optimized_substructure.get_chains())[0].get_residues())
-        constrained_atoms = []
-        for optimized_residue, residue in zip(optimized_substructure_residues, self.residues):
-            for atom in optimized_residue.get_atoms():
-                if atom.name in residue.constrained_atom_symbols:
-                    constrained_atoms.append(atom)
-        sup = Superimposer()
-        sup.set_atoms([atom for residue in self.residues for atom in residue.constrained_atoms], constrained_atoms)
-        sup.apply(optimized_substructure.get_atoms())
-        original_atoms = []
-        optimized_atoms = []
-        for optimized_residue, residue in zip(optimized_substructure_residues, self.residues):
-            for atom_symbol in residue.non_constrained_atom_symbols:
-                original_atoms.append(self.PRO.structure[int(residue.index)][atom_symbol].coord)
-                optimized_atoms.append(optimized_residue[atom_symbol].coord)
-                self.PRO.structure[int(residue.index)][atom_symbol].set_coord(optimized_residue[atom_symbol].coord)
-        return np.sqrt(np.sum((np.array(original_atoms) - np.array(optimized_atoms))**2)/len(original_atoms))
+        if path.isfile(f"{self.substructure_data_dir}/xtbopt.pdb"):
+            category = "Optimized rezidue"
+            optimized_substructure = self.PDBParser.get_structure("substructure", f"{self.substructure_data_dir}/xtbopt.pdb")[0]
+            optimized_substructure_residues = list(list(optimized_substructure.get_chains())[0].get_residues())
+            constrained_atoms = []
+            for optimized_residue, residue in zip(optimized_substructure_residues, self.residues):
+                for atom in optimized_residue.get_atoms():
+                    if atom.name in residue.constrained_atom_symbols:
+                        constrained_atoms.append(atom)
+            sup = Superimposer()
+            sup.set_atoms([atom for residue in self.residues for atom in residue.constrained_atoms], constrained_atoms)
+            sup.apply(optimized_substructure.get_atoms())
+
+            original_atoms_positions = []
+            optimized_atoms_positions = []
+            for optimized_residue, residue in zip(optimized_substructure_residues, self.residues):
+                if residue.index == self.optimized_residue.id[1]:
+                    for atom in optimized_residue.get_atoms():
+                        optimized_atoms_positions.append(atom.coord)
+                    for atom in self.PRO.structure[int(residue.index)]:
+                        original_atoms_positions.append(atom.coord)
+
+
+            residual_rmsd = np.sqrt(np.sum((np.array(original_atoms_positions) - np.array(optimized_atoms_positions)) ** 2) / len(original_atoms_positions))
+            if residual_rmsd > 0.5:
+                category = "Highly optimized rezidue"
+        else:
+            category = "Not optimized rezidue"
+            residual_rmsd = None
+        log = {"residue index": self.optimized_residue.id[1],
+                              "residue name": SeqUtils.IUPACData.protein_letters_3to1[self.optimized_residue.resname.capitalize()],
+                              "category": category,
+                              "residual_rmsd": residual_rmsd}
+        return optimized_atoms_positions, log
+
 
 class PRO:
     def __init__(self,
                  data_dir: str,
-                 PDB_file: str):
-        self.n_optimized_residues = 0
+                 PDB_file: str,
+                 cpu: int):
         self.data_dir = data_dir
         self.PDB_file = PDB_file
+        self.cpu = cpu
 
     def optimize(self):
         self._prepare_directory()
         self._load_molecule()
-        self._calculate_depth_of_residues()
-        # optimize residues from the most embedded residues
-        logs = []
-        for i, res_i in enumerate(sorted(range(len(self.residues_depth)), key=self.residues_depth.__getitem__, reverse=True), start=1):
-            from time import time
-            s = time()
-            residue = self.residues[res_i]
-            substructure = Substructure(residue,
-                                        self)
-            optimized = substructure.optimize()
-            category = "Not optimized rezidue"
-            if optimized:
-                residual_rmsd = substructure.update_PDB()
-                if residual_rmsd > 0.5:
-                    category = "Highly optimized rezidue"
-                else:
-                    category = "Optimized rezidue"
-            logs.append({"residue index": res_i+1,
-                         "residue name": SeqUtils.IUPACData.protein_letters_3to1[residue.resname.capitalize()],
-                         "category": category,
-                         "residual_rmsd": residual_rmsd})
-            self.n_optimized_residues = i
 
+        with Pool(self.cpu) as p:
+            a = p.starmap(optimize_substructures, [(res, self) for res in self.residues])
+
+        for i, res in enumerate(self.structure.get_residues()):
+            for atom, coord in zip(res.get_atoms(), a[i][0]):
+                atom.set_coord(coord)
+
+        logs = [x[1] for x in a]
         with open(f"{self.data_dir}/residues.logs", "w") as residues_logs:
-            logs = json.dumps(sorted(logs, key=lambda x: x['residue index']), indent=2)
-            residues_logs.write(logs)
+            residues_logs.write(json.dumps(sorted(logs, key=lambda x: x['residue index']), indent=2))
         self.io.save(f"{self.data_dir}/optimized_PDB/{path.basename(self.PDB_file[:-4])}_optimized.pdb")
         print(f"Structure succesfully optimized.\n")
 
@@ -203,19 +204,16 @@ class PRO:
             io.set_structure(structure)
             self.io = io
             self.structure = io.structure[0]["A"]
-
         except KeyError:
             print(f"\nERROR! PDB file {self.PDB_file} does not contain any structure.\n")
             exit()
         self.residues = list(self.structure.get_residues())
+        kdtree = NeighborSearch(list(self.structure.get_atoms()))
+        self.nearest_residues = [set(kdtree.search(residue.center_of_mass(geometric=True), 12, level="R"))
+                                 for residue in self.residues]
         print("ok\n")
-
-    def _calculate_depth_of_residues(self):
-        self.kdtree = NeighborSearch(list(self.structure.get_atoms()))
-        self.residues_depth = [len(self.kdtree.search(residue.center_of_mass(geometric=True), 15, level="A"))
-                               for residue in self.residues]
 
 
 if __name__ == '__main__':
     args = load_arguments()
-    PRO(args.data_dir, args.PDB_file).optimize()
+    PRO(args.data_dir, args.PDB_file, args.cpu).optimize()
