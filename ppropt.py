@@ -6,7 +6,6 @@ from Bio import SeqUtils
 from Bio.PDB import Select, PDBIO, PDBParser, Superimposer, NeighborSearch
 from dataclasses import dataclass
 from os import system, path
-from scipy.spatial.distance import cdist
 from multiprocessing import Process, Manager
 from multiprocessing import Pool
 
@@ -68,7 +67,7 @@ def optimize_substructures(res, PRO):
             substructure_settings = open(f"{substructure_data_dir}/xtb_settings.inp", "r").read().replace("rf", "lbfgs") # zkusit, zda funguje!
             with open(f"{substructure_data_dir}/xtb_settings.inp", "w") as xtb_settings_file:
                 xtb_settings_file.write(substructure_settings)
-            system(f"cd {self.substructure_data_dir} ;"
+            system(f"cd {substructure_data_dir} ;"
                    f"ulimit -s unlimited ;"
                    f"export OMP_NUM_THREADS=1,1 ;"
                    f"export OMP_MAX_ACTIVE_LEVELS=1 ;"
