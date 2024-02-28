@@ -14,7 +14,7 @@ def load_arguments():
     print("\nParsing arguments... ", end="")
     parser = argparse.ArgumentParser()
     parser.add_argument('--PDB_file', type=str, required=True,
-                        help='PDB file with structure, which should be optimized.')
+                        help='PDB file with structure, which should be optimised.')
     parser.add_argument('--data_dir', type=str, required=True,
                         help='Directory for saving results.')
     parser.add_argument('--cpu', type=int, required=False, default=1,
@@ -44,17 +44,17 @@ class Residue:
 
 
 @numba.jit(cache=True, nopython=True, fastmath=True, boundscheck=False, nogil=True)
-def numba_dist(optimized_residue, residue):
+def numba_dist(optimised_residue, residue):
      distances = np.empty(len(residue))
-     mins = np.empty(len(optimized_residue))
-     for i,a in enumerate(optimized_residue):
+     mins = np.empty(len(optimised_residue))
+     for i,a in enumerate(optimised_residue):
          for j,b in enumerate(residue):
              distances[j] = ((a[0]-b[0])**2 + (a[1]-b[1])**2 +(a[2]-b[2])**2 )**(1/2)
          mins[i] = distances.min()
      return mins, mins.min()
 
 
-def optimize_substructures(res, PRO):
+def optimise_substructures(res, PRO):
         substructure = Substructure(res, PRO)
         substructure_data_dir = f"{PRO.data_dir}/sub_{res.id[1]}"
         system(f"cd {substructure_data_dir} ;"
@@ -75,20 +75,21 @@ def optimize_substructures(res, PRO):
                    f"xtb substructure.pdb --gfnff --input xtb_settings.inp --opt --alpb water --verbose > xtb_output.txt 2>&1 ; rm gfnff_*")
         return substructure.update_PDB()
 
+
 class Substructure:
     def __init__(self,
-                 optimized_residue,
+                 optimised_residue,
                  PRO):
-        self.optimized_residue = optimized_residue
+        self.optimised_residue = optimised_residue
         self.PRO = PRO
-        self.substructure_data_dir = f"{PRO.data_dir}/sub_{self.optimized_residue.id[1]}"
+        self.substructure_data_dir = f"{PRO.data_dir}/sub_{self.optimised_residue.id[1]}"
         self.PDBParser = PDBParser(QUIET=True)
         self.residues = []
         self.constrained_atoms_indices = []
-        near_residues = sorted(self.PRO.nearest_residues[self.optimized_residue.id[1]-1])
+        near_residues = sorted(self.PRO.nearest_residues[self.optimised_residue.id[1]-1])
         counter_atoms = 1  # start from 1 because of xtb countering
         for residue in near_residues:
-            mins, total_min = numba_dist(np.array([atom.coord for atom in residue.get_atoms()]), np.array([atom.coord for atom in optimized_residue.get_atoms()]))
+            mins, total_min = numba_dist(np.array([atom.coord for atom in residue.get_atoms()]), np.array([atom.coord for atom in optimised_residue.get_atoms()]))
             if total_min < 5:
                 constrained_atoms = []
                 non_constrained_atoms_symbols = set()
@@ -123,39 +124,37 @@ $end
 
     def update_PDB(self):
         if path.isfile(f"{self.substructure_data_dir}/xtbopt.pdb"):
-            category = "Optimized rezidue"
-            optimized_substructure = self.PDBParser.get_structure("substructure", f"{self.substructure_data_dir}/xtbopt.pdb")[0]
-            optimized_substructure_residues = list(list(optimized_substructure.get_chains())[0].get_residues())
+            category = "Optimised residue"
+            optimised_substructure = self.PDBParser.get_structure("substructure", f"{self.substructure_data_dir}/xtbopt.pdb")[0]
+            optimised_substructure_residues = list(list(optimised_substructure.get_chains())[0].get_residues())
             constrained_atoms = []
-            for optimized_residue, residue in zip(optimized_substructure_residues, self.residues):
-                for atom in optimized_residue.get_atoms():
+            for optimised_residue, residue in zip(optimised_substructure_residues, self.residues):
+                for atom in optimised_residue.get_atoms():
                     if atom.name in residue.constrained_atom_symbols:
                         constrained_atoms.append(atom)
             sup = Superimposer()
             sup.set_atoms([atom for residue in self.residues for atom in residue.constrained_atoms], constrained_atoms)
-            sup.apply(optimized_substructure.get_atoms())
-
+            sup.apply(optimised_substructure.get_atoms())
             original_atoms_positions = []
-            optimized_atoms_positions = []
-            for optimized_residue, residue in zip(optimized_substructure_residues, self.residues):
-                if residue.index == self.optimized_residue.id[1]:
-                    for atom in optimized_residue.get_atoms():
-                        optimized_atoms_positions.append(atom.coord)
+            optimised_atoms_positions = []
+            for optimised_residue, residue in zip(optimised_substructure_residues, self.residues):
+                if residue.index == self.optimised_residue.id[1]:
+                    for atom in optimised_residue.get_atoms():
+                        optimised_atoms_positions.append(atom.coord)
                     for atom in self.PRO.structure[int(residue.index)]:
                         original_atoms_positions.append(atom.coord)
-
-
-            residual_rmsd = np.sqrt(np.sum((np.array(original_atoms_positions) - np.array(optimized_atoms_positions)) ** 2) / len(original_atoms_positions))
+            residual_rmsd = np.sqrt(np.sum((np.array(original_atoms_positions) - np.array(optimised_atoms_positions)) ** 2) / len(original_atoms_positions))
             if residual_rmsd > 1:
-                category = "Highly optimized rezidue"
+                category = "Highly optimised residue"
         else:
-            category = "Not optimized rezidue"
+            category = "Not optimised residue"
             residual_rmsd = None
-        log = {"residue index": self.optimized_residue.id[1],
-                              "residue name": SeqUtils.IUPACData.protein_letters_3to1[self.optimized_residue.resname.capitalize()],
+            optimised_atoms_positions = original_atoms_positions
+        log = {"residue index": self.optimised_residue.id[1],
+                              "residue name": SeqUtils.IUPACData.protein_letters_3to1[self.optimised_residue.resname.capitalize()],
                               "category": category,
                               "residual_rmsd": residual_rmsd}
-        return optimized_atoms_positions, log
+        return optimised_atoms_positions, log
 
 
 class PRO:
@@ -167,22 +166,22 @@ class PRO:
         self.PDB_file = PDB_file
         self.cpu = cpu
 
-    def optimize(self):
+    def optimise(self):
         self._prepare_directory()
         self._load_molecule()
 
         with Pool(self.cpu) as p:
-            a = p.starmap(optimize_substructures, [(res, self) for res in self.residues])
+            optimisations = p.starmap(optimise_substructures, [(res, self) for res in self.residues])
 
         for i, res in enumerate(self.structure.get_residues()):
-            for atom, coord in zip(res.get_atoms(), a[i][0]):
+            for atom, coord in zip(res.get_atoms(), optimisations[i][0]):
                 atom.set_coord(coord)
 
-        logs = [x[1] for x in a]
+        logs = [o[1] for o in optimisations]
         with open(f"{self.data_dir}/residues.logs", "w") as residues_logs:
             residues_logs.write(json.dumps(sorted(logs, key=lambda x: x['residue index']), indent=2))
-        self.io.save(f"{self.data_dir}/optimized_PDB/{path.basename(self.PDB_file[:-4])}_optimized.pdb")
-        print(f"Structure succesfully optimized.\n")
+        self.io.save(f"{self.data_dir}/optimised_PDB/{path.basename(self.PDB_file[:-4])}_optimised.pdb")
+        print(f"Structure succesfully optimised.\n")
 
     def _prepare_directory(self):
         print("\nPreparing a data directory... ", end="")
@@ -191,7 +190,7 @@ class PRO:
                  f"Remove existed directory or change --data_dir argument.")
         system(f"mkdir {self.data_dir};"
                f"mkdir {self.data_dir}/inputed_PDB;"
-               f"mkdir {self.data_dir}/optimized_PDB;"
+               f"mkdir {self.data_dir}/optimised_PDB;"
                f"cp {self.PDB_file} {self.data_dir}/inputed_PDB")
         print("ok\n")
 
@@ -215,4 +214,4 @@ class PRO:
 
 if __name__ == '__main__':
     args = load_arguments()
-    PRO(args.data_dir, args.PDB_file, args.cpu).optimize()
+    PRO(args.data_dir, args.PDB_file, args.cpu).optimise()
