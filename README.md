@@ -1,4 +1,4 @@
-PPRopt is a Python application for the fast protein structure optimisation. It is rapid alternative to protein structure optimisation with constrained alpha carbons. During the PPROpt method, the entire structure is not optimised at once but individual residues are optimised sequentially. The main advantage of such approach is its linear time complexity with respect to the number of atoms, where the optimisation time using a regular laptop is usually about 0.14 second per atom. 
+PPRopt is a Python application for the fast protein structure optimisation. It is rapid alternative to protein structure optimisation with constrained alpha carbons. During the PPROpt method, the entire structure is not optimised at once but individual residues are optimised sequentially. The main advantage of such approach is its linear time complexity with respect to the number of atoms. 
 
 ## How to install
 

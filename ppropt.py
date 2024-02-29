@@ -45,11 +45,11 @@ class Residue:
 
 @numba.jit(cache=True, nopython=True, fastmath=True, boundscheck=False, nogil=True)
 def numba_dist(optimised_residue, residue):
-     distances = np.empty(len(residue))
-     mins = np.empty(len(optimised_residue))
-     for i,a in enumerate(optimised_residue):
-         for j,b in enumerate(residue):
-             distances[j] = ((a[0]-b[0])**2 + (a[1]-b[1])**2 +(a[2]-b[2])**2 )**(1/2)
+     distances = np.empty(len(optimised_residue))
+     mins = np.empty(len(residue))
+     for i,a in enumerate(residue):
+         for j,b in enumerate(optimised_residue):
+             distances[j] = ((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)**(1/2)
          mins[i] = distances.min()
      return mins, mins.min()
 
@@ -89,7 +89,8 @@ class Substructure:
         near_residues = sorted(self.PRO.nearest_residues[self.optimised_residue.id[1]-1])
         counter_atoms = 1  # start from 1 because of xtb countering
         for residue in near_residues:
-            mins, total_min = numba_dist(np.array([atom.coord for atom in residue.get_atoms()]), np.array([atom.coord for atom in optimised_residue.get_atoms()]))
+            # mins, total_min = numba_dist(np.array([atom.coord for atom in residue.get_atoms()]), np.array([atom.coord for atom in optimised_residue.get_atoms()]))
+            mins, total_min = numba_dist(np.array([atom.coord for atom in self.optimised_residue.get_atoms()]), np.array([atom.coord for atom in residue.get_atoms()]))
             if total_min < 5:
                 constrained_atoms = []
                 non_constrained_atoms_symbols = set()
