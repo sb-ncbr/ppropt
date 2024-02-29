@@ -89,7 +89,6 @@ class Substructure:
         near_residues = sorted(self.PRO.nearest_residues[self.optimised_residue.id[1]-1])
         counter_atoms = 1  # start from 1 because of xtb countering
         for residue in near_residues:
-            # mins, total_min = numba_dist(np.array([atom.coord for atom in residue.get_atoms()]), np.array([atom.coord for atom in optimised_residue.get_atoms()]))
             mins, total_min = numba_dist(np.array([atom.coord for atom in self.optimised_residue.get_atoms()]), np.array([atom.coord for atom in residue.get_atoms()]))
             if total_min < 5:
                 constrained_atoms = []
