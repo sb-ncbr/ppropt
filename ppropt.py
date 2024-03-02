@@ -162,9 +162,7 @@ $end
 
 class PRO:
     def __init__(self,
-                 data_dir: str,
-                 PDB_file: str,
-                 cpu: int):
+                 args):
         self.data_dir = args.data_dir
         self.PDB_file = args.PDB_file
         self.cpu = args.cpu
