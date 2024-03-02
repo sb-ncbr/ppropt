@@ -17,6 +17,9 @@ def load_arguments():
                         help='PDB file with structure, which should be optimised.')
     parser.add_argument('--data_dir', type=str, required=True,
                         help='Directory for saving results.')
+    parser.add_argument("--delete_auxiliary_files", help="Auxiliary calculation files can be large. With this argument, "
+                                                         "the auxiliary files will be continuously deleted during the calculation.",
+                        action="store_true")
     parser.add_argument('--cpu', type=int, required=False, default=1,
                         help='How many CPUs should be used for the calculation.')
     args = parser.parse_args()
@@ -162,9 +165,10 @@ class PRO:
                  data_dir: str,
                  PDB_file: str,
                  cpu: int):
-        self.data_dir = data_dir
-        self.PDB_file = PDB_file
-        self.cpu = cpu
+        self.data_dir = args.data_dir
+        self.PDB_file = args.PDB_file
+        self.cpu = args.cpu
+        self.delete_auxiliary_files = args.delete_auxiliary_files
 
     def optimise(self):
         self._prepare_directory()
@@ -181,6 +185,8 @@ class PRO:
         with open(f"{self.data_dir}/residues.logs", "w") as residues_logs:
             residues_logs.write(json.dumps(sorted(logs, key=lambda x: x['residue index']), indent=2))
         self.io.save(f"{self.data_dir}/optimised_PDB/{path.basename(self.PDB_file[:-4])}_optimised.pdb")
+        if self.delete_auxiliary_files:
+            system(f"for au_file in {self.data_dir}/sub_* ; do rm -fr $au_file ; done &")
         print(f"Structure succesfully optimised.\n")
 
     def _prepare_directory(self):
@@ -214,4 +220,4 @@ class PRO:
 
 if __name__ == '__main__':
     args = load_arguments()
-    PRO(args.data_dir, args.PDB_file, args.cpu).optimise()
+    PRO(args).optimise()
