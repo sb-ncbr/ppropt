@@ -162,11 +162,14 @@ $end
 
 class PRO:
     def __init__(self,
-                 args):
-        self.data_dir = args.data_dir
-        self.PDB_file = args.PDB_file
-        self.cpu = args.cpu
-        self.delete_auxiliary_files = args.delete_auxiliary_files
+                 data_dir: str,
+                 PDB_file: str,
+                 cpu: int,
+                 delete_auxiliary_files: bool):
+        self.data_dir = data_dir
+        self.PDB_file = PDB_file
+        self.cpu = cpu
+        self.delete_auxiliary_files = delete_auxiliary_files
 
     def optimise(self):
         self._prepare_directory()
@@ -218,4 +221,4 @@ class PRO:
 
 if __name__ == '__main__':
     args = load_arguments()
-    PRO(args).optimise()
+    PRO(args.data_dir, args.PDB_file, args.cpu, args.delete_auxiliary_files).optimise()
