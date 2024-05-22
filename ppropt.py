@@ -1,14 +1,11 @@
 import argparse
 import json
-import numba
-import numpy as np
 from Bio import SeqUtils
 from Bio.PDB import Select, PDBIO, PDBParser, Superimposer, NeighborSearch
 from dataclasses import dataclass
 from os import system, path
-from scipy.spatial.distance import cdist
 from multiprocessing import Pool
-
+from math import dist
 
 
 def load_arguments():
@@ -27,6 +24,9 @@ def load_arguments():
     if not path.isfile(args.PDB_file):
         print(f"\nERROR! File {args.PDB_file} does not exist!\n")
         exit()
+    if path.exists(args.data_dir):
+        exit(f"\n\nError! Directory with name {args.data_dir} exists. "
+             f"Remove existed directory or change --data_dir argument.")
     print("ok")
     return args
 
@@ -45,15 +45,14 @@ class Residue:
     constrained_atoms: list
 
 
-@numba.jit(cache=True, nopython=True, fastmath=True, boundscheck=False, nogil=True)
-def numba_dist(residue1, residue2):
-     distances = np.empty(len(residue1))
-     mins = np.empty(len(residue2))
+def get_distances(residue1, residue2):
+     distances = [0 for x in range(len(residue1))]
+     mins = [0 for x in range(len(residue2))]
      for i,a in enumerate(residue2):
          for j,b in enumerate(residue1):
              distances[j] = ((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)**(1/2)
-         mins[i] = distances.min()
-     return mins, mins.min()
+         mins[i] = min(distances)
+     return mins, min(mins)
 
 
 def optimise_substructure(optimised_residue, PRO):
@@ -66,8 +65,10 @@ def optimise_substructure(optimised_residue, PRO):
     counter_atoms = 1  # start from 1 because of xtb countering
     near_residues = sorted(PRO.nearest_residues[optimised_residue_index-1])
     for residue in near_residues:  # select substructure residues
-        minimum_distances, absolute_min_distance = numba_dist(np.array([atom.coord for atom in optimised_residue.get_atoms()]),
-                                                              np.array([atom.coord for atom in residue.get_atoms()]))
+
+        minimum_distances, absolute_min_distance = get_distances([atom.coord for atom in optimised_residue.get_atoms()],
+                                                                 [atom.coord for atom in residue.get_atoms()])
+
         if absolute_min_distance < 6:
             constrained_atoms = []
             for atom_distance, atom in zip(minimum_distances, residue.get_atoms()):
@@ -98,10 +99,8 @@ def optimise_substructure(optimised_residue, PRO):
         hydrogens_counter = num_of_atoms
         for line in added_atoms:
             res_i = int(line[22:26])
-            if any((cdist(([float(x) for x in [line[30:38], line[38:46], line[46:54]]],),
-                          (PRO.structure[res_i]["C"].coord,)) < 1.1,
-                    cdist(([float(x) for x in [line[30:38], line[38:46], line[46:54]]],),
-                          (PRO.structure[res_i]["N"].coord,)) < 1.1)):
+            if any([dist([float(line[30:38]), float(line[38:46]), float(line[46:54])], PRO.structure[res_i]["C"].coord) < 1.1,
+                    dist([float(line[30:38]), float(line[38:46]), float(line[46:54])], PRO.structure[res_i]["N"].coord) < 1.1]):
                 repaired_substructure_file.write(line)
                 hydrogens_counter += 1
                 added_hydrogen_indices.append(hydrogens_counter)
@@ -137,29 +136,23 @@ def optimise_substructure(optimised_residue, PRO):
         category = "Optimised residue"
         optimised_substructure = PDBParser(QUIET=True).get_structure("substructure", f"{substructure_data_dir}/xtbopt.pdb")[0]
         optimised_substructure_residues = list(list(optimised_substructure.get_chains())[0].get_residues())
-
-
+        or_constrained_atoms = []
+        op_constrained_atoms = []
+        for or_r, op_r in zip(substructure_residues, optimised_substructure_residues):
+            for constrained_atom in or_r.constrained_atoms:
+                or_constrained_atoms.append(constrained_atom)
+                op_constrained_atoms.append(op_r[constrained_atom.name])
         sup = Superimposer()
-        # todo přepsat není potřeba
-        sup.set_atoms([atom for residue in substructure_residues for atom in residue.constrained_atoms if atom.name == "CA"], [ atom for atom in list(list(optimised_substructure.get_chains())[0].get_atoms()) if atom.name == "CA"])
-
+        sup.set_atoms(or_constrained_atoms, op_constrained_atoms)
         sup.apply(optimised_substructure.get_atoms())
         for op_res, or_res in zip(optimised_substructure_residues, substructure_residues):
             or_res.coordinates = [a.coord for a in op_res.get_atoms()]
     else:
         category = "Not optimised residue"
-        substructure_residues = None
-
     log = {"residue index": optimised_residue_index,
            "residue name": SeqUtils.IUPACData.protein_letters_3to1[optimised_residue.resname.capitalize()],
            "category": category}
     return log, substructure_residues
-
-
-
-
-
-
 
 
 class PRO:
@@ -174,8 +167,8 @@ class PRO:
         self.delete_auxiliary_files = delete_auxiliary_files
 
     def optimise(self):
-        self._prepare_directory()
         self._load_molecule()
+        print("Optimisation... ", end="")
         with Pool(self.cpu) as p:
 
             logs = []
@@ -183,36 +176,37 @@ class PRO:
                 optimisations = p.starmap(optimise_substructure, [(residue, self) for residue in round_residues])
                 for log, optimised_residues in optimisations:
                     logs.append(log)
-                    if optimised_residues:
+                    if log["category"] == "Optimised residue":
                         for optimised_residue in optimised_residues:
                             for coord, or_atom in zip(optimised_residue.coordinates, self.residues[optimised_residue.index-1].get_atoms()):
                                 or_atom.coord = coord
+        print("ok")
 
-
-
-        # doplnit rmsd, případně upravit category
-
-
+        print("Storage of the optimised structure... ", end="")
+        logs = sorted(logs, key=lambda x: x['residue index'])
+        atoms_counter = 0
+        for optimised_residue, log in zip(self.residues, logs):
+            d = 0
+            for optimised_atom in optimised_residue.get_atoms():
+                d += dist(optimised_atom.coord, self.original_atoms_positions[atoms_counter])**2
+                atoms_counter += 1
+            residual_rmsd = (d / len(list(optimised_residue.get_atoms())))**(1/2)
+            log["residual_rmsd"] = residual_rmsd
+            if residual_rmsd > 1:
+                log["category"] = "Highly optimised residue"
         with open(f"{self.data_dir}/residues.logs", "w") as residues_logs:
-            residues_logs.write(json.dumps(sorted(logs, key=lambda x: x['residue index']), indent=2))
+            residues_logs.write(json.dumps(logs, indent=2))
         self.io.save(f"{self.data_dir}/optimised_PDB/{path.basename(self.PDB_file[:-4])}_optimised.pdb")
         if self.delete_auxiliary_files:
             system(f"for au_file in {self.data_dir}/sub_* ; do rm -fr $au_file ; done &")
-        print(f"Structure succesfully optimised.\n")
+        print("ok\n\n")
 
-    def _prepare_directory(self):
-        print("\nPreparing a data directory... ", end="")
-        if path.exists(self.data_dir):
-            exit(f"\n\nError! Directory with name {self.data_dir} exists. "
-                 f"Remove existed directory or change --data_dir argument.")
+    def _load_molecule(self):
+        print(f"Loading of structure from {self.PDB_file}... ", end="")
         system(f"mkdir {self.data_dir};"
                f"mkdir {self.data_dir}/inputed_PDB;"
                f"mkdir {self.data_dir}/optimised_PDB;"
                f"cp {self.PDB_file} {self.data_dir}/inputed_PDB")
-        print("ok\n")
-
-    def _load_molecule(self):
-        print(f"Loading of structure from {self.PDB_file}... ", end="")
         try:
             structure = PDBParser(QUIET=True).get_structure("structure", self.PDB_file)
             io = PDBIO()
@@ -223,6 +217,7 @@ class PRO:
             print(f"\nERROR! PDB file {self.PDB_file} does not contain any structure.\n")
             exit()
         self.residues = list(self.structure.get_residues())
+        self.original_atoms_positions = [atom.coord for atom in self.structure.get_atoms()]
         kdtree = NeighborSearch(list(self.structure.get_atoms()))
 
         amk_radius = {'ALA': 2.4801,
@@ -249,23 +244,18 @@ class PRO:
         self.nearest_residues = [set(kdtree.search(residue.center_of_mass(geometric=True), amk_radius[residue.resname]+10, level="R"))
                                  for residue in self.residues]
 
-
         self.density_of_atoms_around_residues = []
         for residue in self.residues:
             volume_c = ((4 / 3) * 3.14 * ((amk_radius[residue.resname]) +3) ** 3)
             num_of_atoms_c = len(set(kdtree.search(residue.center_of_mass(geometric=True), (amk_radius[residue.resname]) +2, level="A")))
             density_c = num_of_atoms_c/volume_c
-
             volume_2c = ((4 / 3) * 3.14 * ((amk_radius[residue.resname]) +10) ** 3)
             num_of_atoms_2c = len(set(kdtree.search(residue.center_of_mass(geometric=True), (amk_radius[residue.resname]) +5, level="A")))
             density_2c = num_of_atoms_2c/volume_2c
-
             volume_3c = ((4 / 3) * 3.14 * ((amk_radius[residue.resname]) +15) ** 3)
             num_of_atoms_3c = len(set(kdtree.search(residue.center_of_mass(geometric=True), (amk_radius[residue.resname]) +10, level="A")))
             density_3c = num_of_atoms_3c/volume_3c
-
             self.density_of_atoms_around_residues.append(density_c + density_2c/10 + density_3c/20)
-
 
         unsorted_residues = [res for res in self.residues]
         sorted_residues = []
@@ -287,30 +277,9 @@ class PRO:
                 already_sorted[res.id[1]-1] = True
             sorted_residues.append(round_residues)
         self.sorted_residues = sorted_residues
-        print("ok\n")
+        print("ok")
 
 
 if __name__ == '__main__':
     args = load_arguments()
     PRO(args.data_dir, args.PDB_file, args.cpu, args.delete_auxiliary_files).optimise()
-
-
-# B
-# 0.2314937213030495
-# 0.1942285162060808
-# 0.1460290694882233
-
-# O
-# 0.33201932431805353
-# 0.28619598154219567
-# 0.28383192434012156
-
-# A
-# 0.20287618627567075
-# 0.16309199469263264
-# 0.15014294039213372
-
-# Q
-# 0.2940527720748443
-# 0.2759138088217413
-# 0.2761768060077968

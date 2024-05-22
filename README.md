@@ -8,7 +8,7 @@ Then, clone project and install the project dependencies by running:
 
 ```bash
 $ git clone https://github.com/sb-ncbr/ppropt
-$ conda install scipy=1.11.3 biopython=1.81 openbabel=3.1.1 xtb=6.6.1
+$ conda install biopython=1.81 openbabel=3.1.1 xtb=6.6.1
 ```
 
 ## How to run
@@ -18,5 +18,15 @@ Run the PPROpt optimisation by running the following command inside github repos
 $ python3.11 ppropt.py --PDB_file <path_to_file> --data_dir <directory_to_store_data>
 ```
 
+For example, you can use the example provided:
+
+
+```bash
+$ python3.11 ppropt.py --PDB_file example/L8BU87.pdb --data_dir L8BU87_optimisation
+```
+
+and then compare example/L8BU87_optimised.pdb with L8BU87_optimisation/optimised_PDB/L8BU87_optimised.pdb
+
 ## License
 MIT
+
