@@ -2,13 +2,13 @@ PPRopt is a Python application for the fast protein structure optimisation. It i
 
 ## How to install
 
-To run PPROpt optimisation you will need to have [Python 3.11](https://www.python.org/downloads/) and package manager  [Conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/linux.html) installed.
+To run PPROpt optimisation you will need to have [Python 3.12](https://www.python.org/downloads/) and package manager  [Conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/linux.html) installed.
 
 Then, clone project and install the project dependencies by running:
 
 ```bash
 $ git clone https://github.com/sb-ncbr/ppropt
-$ conda install biopython=1.81 openbabel=3.1.1 xtb=6.6.1
+$ conda install biopython=1.81 xtb=6.6.1
 ```
 
 ## How to run
