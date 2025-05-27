@@ -15,17 +15,8 @@ $ conda install biopython=1.81 xtb=6.6.1
 Run the PPROpt optimisation by running the following command inside github repository:
 
 ```bash
-$ python3.11 ppropt.py --PDB_file <path_to_file> --data_dir <directory_to_store_data>
+$ python3.12 ppropt.py --cpu 1 --PDB_file example/AF-P0DL07-F1-model_v4_protonated_ph7.pdb --data_dir test --run_full_xtb_optimisation
 ```
-
-For example, you can use the example provided:
-
-
-```bash
-$ python3.11 ppropt.py --PDB_file example/L8BU87.pdb --data_dir L8BU87_optimisation
-```
-
-and then compare example/L8BU87_optimised.pdb with L8BU87_optimisation/optimised_PDB/L8BU87_optimised.pdb
 
 ## License
 MIT
